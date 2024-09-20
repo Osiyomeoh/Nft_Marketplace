@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT 
 
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
@@ -18,11 +18,14 @@ contract NFTMarketplace is ERC721URIStorage, AccessControl {
 
     mapping(uint256 => NFTListing) private _listings;
 
+    uint256 public marketplaceFee = 2; // 2% fee
+
     event NFTListed(uint256 tokenId, uint256 price, address seller);
     event NFTSold(uint256 tokenId, uint256 price, address seller, address buyer);
     event MinterAdded(address minter);
     event MinterRemoved(address minter);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ListingCancelled(uint256 tokenId);
 
     constructor() ERC721("NFTMarketplace", "NFTM") {
         _owner = msg.sender;
@@ -45,6 +48,7 @@ contract NFTMarketplace is ERC721URIStorage, AccessControl {
     function listNFT(uint256 tokenId, uint256 price) external {
         require(ownerOf(tokenId) == msg.sender, "Not the owner");
         require(price > 0, "Price must be greater than zero");
+        require(isApprovedForAll(msg.sender, address(this)) || getApproved(tokenId) == address(this), "Marketplace not approved to manage this NFT");
 
         _listings[tokenId] = NFTListing(price, msg.sender);
         emit NFTListed(tokenId, price, msg.sender);
@@ -61,7 +65,12 @@ contract NFTMarketplace is ERC721URIStorage, AccessControl {
         delete _listings[tokenId];
         _transfer(seller, msg.sender, tokenId);
 
-        payable(seller).transfer(price);
+        uint256 feeAmount = (price * marketplaceFee) / 100;
+        uint256 sellerAmount = price - feeAmount;
+
+        payable(seller).transfer(sellerAmount);
+        payable(_owner).transfer(feeAmount);
+
         if (msg.value > price) {
             payable(msg.sender).transfer(msg.value - price);
         }
@@ -72,6 +81,7 @@ contract NFTMarketplace is ERC721URIStorage, AccessControl {
     function cancelListing(uint256 tokenId) external {
         require(_listings[tokenId].seller == msg.sender, "Not the seller");
         delete _listings[tokenId];
+        emit ListingCancelled(tokenId);
     }
 
     function getListing(uint256 tokenId) external view returns (NFTListing memory) {
@@ -104,5 +114,10 @@ contract NFTMarketplace is ERC721URIStorage, AccessControl {
         uint256 balance = address(this).balance;
         require(balance > 0, "No balance to withdraw");
         payable(_owner).transfer(balance);
+    }
+
+    function setMarketplaceFee(uint256 _fee) external onlyOwner {
+        require(_fee <= 10, "Fee too high"); // Max 10% fee
+        marketplaceFee = _fee;
     }
 }
